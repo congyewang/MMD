@@ -1,3 +1,0 @@
-/home/congye/Code/CppProjects/MMD/build/CMakeFiles/MMD.dir
-/home/congye/Code/CppProjects/MMD/build/CMakeFiles/edit_cache.dir
-/home/congye/Code/CppProjects/MMD/build/CMakeFiles/rebuild_cache.dir

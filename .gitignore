@@ -30,3 +30,9 @@
 *.exe
 *.out
 *.app
+
+# Cpp Build
+Cpp/build
+
+# Cuda Build
+Cuda/mmd
