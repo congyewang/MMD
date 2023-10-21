@@ -3,20 +3,20 @@
 #include <cuda_runtime.h>
 
 // CUDA Kernel to compute the RBF kernel between two sets of points
-__device__ float rbfKernel(const float* x, const float* y, int dim, float sigma) {
+__device__ float rbfKernel(const float* x, const float* y, int dim, float sigma_square) {
     float distanceSquared = 0.0f;
     for (int i = 0; i < dim; ++i) {
         float diff = x[i] - y[i];
         distanceSquared += diff * diff;
     }
-    return exp(-distanceSquared / (2.0f * sigma * sigma));
+    return exp(-distanceSquared / (2.0f * sigma_square));
 }
 
 // Function to compute the Maximum Mean Discrepancy (MMD) between two sets of points
-__global__ void computeMMD(float* samplesP, float* samplesQ, int m, int n, int dim, float sigma, float* result) {
+__global__ void computeMMD(float* samplesP, float* samplesQ, int m, int n, int dim, float sigma_square, float* result) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= m + n) return;
-    
+
     float term1 = 0.0f;
     float term2 = 0.0f;
     float term3 = 0.0f;
@@ -24,13 +24,13 @@ __global__ void computeMMD(float* samplesP, float* samplesQ, int m, int n, int d
     if (i < m) {
         // Compute term1
         for (int j = 0; j < m; ++j) {
-            term1 += rbfKernel(samplesP + i * dim, samplesP + j * dim, dim, sigma);
+            term1 += rbfKernel(samplesP + i * dim, samplesP + j * dim, dim, sigma_square);
         }
         term1 /= float(m * m);
         
         // Compute term2
         for (int j = 0; j < n; ++j) {
-            term2 += rbfKernel(samplesP + i * dim, samplesQ + j * dim, dim, sigma);
+            term2 += rbfKernel(samplesP + i * dim, samplesQ + j * dim, dim, sigma_square);
         }
         term2 /= float(m * n);
         term2 *= 2.0f;
@@ -41,7 +41,7 @@ __global__ void computeMMD(float* samplesP, float* samplesQ, int m, int n, int d
         int idx = i - m;
         // Compute term3
         for (int j = 0; j < n; ++j) {
-            term3 += rbfKernel(samplesQ + idx * dim, samplesQ + j * dim, dim, sigma);
+            term3 += rbfKernel(samplesQ + idx * dim, samplesQ + j * dim, dim, sigma_square);
         }
         term3 /= float(n * n);
         
