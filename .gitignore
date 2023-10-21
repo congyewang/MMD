@@ -36,3 +36,6 @@ Cpp/build
 
 # Cuda Build
 Cuda/mmd
+
+# VSCode
+.vscode
