@@ -44,8 +44,8 @@ Eigen::half computeMMD(const MatrixXh& samplesP, const MatrixXh& samplesQ, float
 }
 
 int main() {
-    int numSamplesP = 100;
-    int numSamplesQ = 100;
+    int numSamplesP = 10000;
+    int numSamplesQ = 10000;
     int dim = 2;
 
     VectorXhalf meanP(dim);

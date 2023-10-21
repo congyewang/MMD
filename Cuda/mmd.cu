@@ -1,64 +1,110 @@
+#include <iostream>
 #include <stdio.h>
 #include <cuda_runtime.h>
 
 // CUDA Kernel to compute the RBF kernel between two sets of points
-__global__ void rbf_kernel(float *X, float *Y, int nx, int ny, float sigma, float *result) {
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i < nx) {
-        float sum = 0.0;
-        for (int j = 0; j < ny; j++) {
-            float d = 0.0;
-            for (int k = 0; k < 3; k++) {
-                float diff = X[i * 3 + k] - Y[j * 3 + k];
-                d += diff * diff;
-            }
-            sum += expf(-d / (2 * sigma * sigma));
-        }
-        result[i] = sum / ny;
+__device__ float rbfKernel(const float* x, const float* y, int dim, float sigma) {
+    float distanceSquared = 0.0f;
+    for (int i = 0; i < dim; ++i) {
+        float diff = x[i] - y[i];
+        distanceSquared += diff * diff;
     }
+    return exp(-distanceSquared / (2.0f * sigma * sigma));
 }
 
 // Function to compute the Maximum Mean Discrepancy (MMD) between two sets of points
-float compute_mmd(float *X, float *Y, int nx, int ny, float sigma) {
-    float *d_X, *d_Y, *d_result;
-    cudaMalloc(&d_X, nx * 3 * sizeof(float));
-    cudaMalloc(&d_Y, ny * 3 * sizeof(float));
-    cudaMalloc(&d_result, nx * sizeof(float));
+__global__ void computeMMD(float* samplesP, float* samplesQ, int m, int n, int dim, float sigma, float* result) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= m + n) return;
+    
+    float term1 = 0.0f;
+    float term2 = 0.0f;
+    float term3 = 0.0f;
 
-    cudaMemcpy(d_X, X, nx * 3 * sizeof(float), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_Y, Y, ny * 3 * sizeof(float), cudaMemcpyHostToDevice);
+    if (i < m) {
+        // Compute term1
+        for (int j = 0; j < m; ++j) {
+            term1 += rbfKernel(samplesP + i * dim, samplesP + j * dim, dim, sigma);
+        }
+        term1 /= float(m * m);
+        
+        // Compute term2
+        for (int j = 0; j < n; ++j) {
+            term2 += rbfKernel(samplesP + i * dim, samplesQ + j * dim, dim, sigma);
+        }
+        term2 /= float(m * n);
+        term2 *= 2.0f;
 
-    int block_size = 256;
-    int grid_size = (nx + block_size - 1) / block_size;
-    rbf_kernel<<<grid_size, block_size>>>(d_X, d_Y, nx, ny, sigma, d_result);
-
-    float *result = (float *)malloc(nx * sizeof(float));
-    cudaMemcpy(result, d_result, nx * sizeof(float), cudaMemcpyDeviceToHost);
-
-    float mmd = 0.0;
-    for (int i = 0; i < nx; i++) {
-        mmd += result[i];
+        // Update result
+        atomicAdd(result, term1 - term2);
+    } else {
+        int idx = i - m;
+        // Compute term3
+        for (int j = 0; j < n; ++j) {
+            term3 += rbfKernel(samplesQ + idx * dim, samplesQ + j * dim, dim, sigma);
+        }
+        term3 /= float(n * n);
+        
+        // Update result
+        atomicAdd(result, term3);
     }
-    mmd /= nx;
-
-    cudaFree(d_X);
-    cudaFree(d_Y);
-    cudaFree(d_result);
-    free(result);
-
-    return mmd;
 }
 
 int main() {
-    // Test data: two sets of 3D points
-    float X[] = {1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0};
-    float Y[] = {10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0};
-    int nx = 3;
-    int ny = 3;
-    float sigma = 1.0;
+    // Example usage
+    // float X_h[9] = {1, 2, 3, 4, 5, 6, 7, 8, 9};
+    // float Y_h[12] = {7, 6, 5, 4, 3, 2, 1, 1, 8, 0, 2, 5};
 
-    float mmd = compute_mmd(X, Y, nx, ny, sigma);
-    printf("Maximum Mean Discrepancy: %f\n", mmd);
+    float *X_d, *Y_d, *result_d;
+    float result_h = 0.0f;
+
+    // int m = 3;
+    // int n = 4;
+    // int dim = 3;
+
+    // Example usage
+    int m = 1000000;
+    int n = 1000000;
+    int dim = 2;
+
+    float *X_h = new float[m * dim];
+    float *Y_h = new float[n * dim];
+
+    // Generate random numbers for X_h and Y_h
+    srand(time(NULL));
+    for (int i = 0; i < m * dim; ++i) {
+        X_h[i] = static_cast <float> (rand()) / static_cast <float> (RAND_MAX);
+    }
+    for (int i = 0; i < n * dim; ++i) {
+        Y_h[i] = static_cast <float> (rand()) / static_cast <float> (RAND_MAX);
+    }
+    float sigma = 1.0f;
+
+    // Allocate device memory
+    cudaMalloc(&X_d, m * dim * sizeof(float));
+    cudaMalloc(&Y_d, n * dim * sizeof(float));
+    cudaMalloc(&result_d, sizeof(float));
+
+    // Copy data to device
+    cudaMemcpy(X_d, X_h, m * dim * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(Y_d, Y_h, n * dim * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(result_d, &result_h, sizeof(float), cudaMemcpyHostToDevice);
+
+    // Launch kernel
+    int threadsPerBlock = 256;
+    int blocks = (m + n + threadsPerBlock - 1) / threadsPerBlock;
+    computeMMD<<<blocks, threadsPerBlock>>>(X_d, Y_d, m, n, dim, sigma, result_d);
+
+    // Copy result back to host
+    cudaMemcpy(&result_h, result_d, sizeof(float), cudaMemcpyDeviceToHost);
+
+    // Free device memory
+    cudaFree(X_d);
+    cudaFree(Y_d);
+    cudaFree(result_d);
+
+    // Print result
+    std::cout << "MMD value: " << result_h << std::endl;
 
     return 0;
 }
